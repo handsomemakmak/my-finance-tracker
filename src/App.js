@@ -31,11 +31,9 @@ const appId = "my-finance-app";
 
 const COLORS = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8', '#F7DC6F'];
 
-// --- Helper Functions ---
 const getDaysInMonth = (year, month) => new Date(year, month + 1, 0).getDate();
 const getFirstDayOfMonth = (year, month) => new Date(year, month, 1).getDay();
 
-// --- Login View ---
 function LoginView({ onLoginSuccess }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -80,37 +78,35 @@ function LoginView({ onLoginSuccess }) {
   );
 }
 
-// --- Main App ---
 export default function App() {
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [user, setUser] = useState(null);
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
-  
-  // Date Control
   const [viewDate, setViewDate] = useState(new Date());
   const [editingId, setEditingId] = useState(null);
 
-  // Form State
   const [type, setType] = useState('expense');
   const [category, setCategory] = useState('ค่าอาหาร-เครื่องดื่ม');
   const [subCategory, setSubCategory] = useState('');
   const [amount, setAmount] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
 
-  const categories = {
+  const categories = useMemo(() => ({
     income: ['เงินเดือน', 'เงิน Affiliate', 'อื่นๆ (ระบุ)'],
     expense: ['ค่าอาหาร-เครื่องดื่ม', 'ค่าเดินทาง(น้ำมัน)', 'สิ่งของฟุ่มเฟือย', 'อื่นๆ'],
     saving: ['สะสมฉุกเฉิน', 'เงินออม', 'ลงทุน (คริปโต)', 'ลงทุน (หุ้น/กองทุน)']
-  };
+  }), []);
 
   useEffect(() => {
     const savedAuth = sessionStorage.getItem('is_admin_logged_in');
     if (savedAuth === 'true') setIsAuthorized(true);
+    
     const initAuth = async () => {
       try { await signInAnonymously(auth); } catch (err) { setLoading(false); }
     };
     initAuth();
+
     const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       if (!currentUser) setLoading(false);
@@ -126,13 +122,12 @@ export default function App() {
       setTransactions(data);
       setLoading(false);
     }, (err) => {
-      console.error(err);
+      console.error("Firestore Error:", err);
       setLoading(false);
     });
     return () => unsubscribeData();
   }, [user, isAuthorized]);
 
-  // Derived Data for Filtered View
   const filteredTransactions = useMemo(() => {
     return transactions.filter(t => {
       const d = new Date(t.date);
@@ -140,18 +135,13 @@ export default function App() {
     }).sort((a, b) => new Date(b.date) - new Date(a.date));
   }, [transactions, viewDate]);
 
-  // Calendar Data
   const calendarDays = useMemo(() => {
     const year = viewDate.getFullYear();
     const month = viewDate.getMonth();
     const daysInMonth = getDaysInMonth(year, month);
     const firstDay = getFirstDayOfMonth(year, month);
     const calendar = [];
-    
-    // Empty slots before first day
     for (let i = 0; i < firstDay; i++) calendar.push(null);
-    
-    // Days
     for (let d = 1; d <= daysInMonth; d++) {
       const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
       const dayTxs = transactions.filter(t => t.date === dateStr);
@@ -196,7 +186,6 @@ export default function App() {
     e.preventDefault();
     if (!user || !amount) return;
     try {
-      const transactionsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'transactions');
       const data = {
         type, category,
         subCategory: (category === 'อื่นๆ (ระบุ)' || category.includes('ลงทุน')) ? subCategory : '',
@@ -207,10 +196,11 @@ export default function App() {
       if (editingId) {
         await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'transactions', editingId), data);
       } else {
+        const transactionsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'transactions');
         await addDoc(transactionsRef, { ...data, createdAt: serverTimestamp() });
       }
       resetForm();
-    } catch (err) { alert(err.message); }
+    } catch (err) { console.error(err); }
   };
 
   const handleDelete = async (id) => {
@@ -249,6 +239,12 @@ export default function App() {
       return acc;
     }, []);
 
+  const changeMonth = (offset) => {
+    const newDate = new Date(viewDate);
+    newDate.setMonth(newDate.getMonth() + offset);
+    setViewDate(newDate);
+  };
+
   if (!isAuthorized) return <LoginView onLoginSuccess={handleLoginSuccess} />;
   if (loading) return <div className="h-screen flex items-center justify-center bg-slate-50"><RefreshCcw className="animate-spin text-blue-600" /></div>;
 
@@ -269,11 +265,11 @@ export default function App() {
           </div>
           <div className="flex items-center space-x-4">
              <div className="hidden md:flex items-center bg-slate-50 rounded-2xl p-1 px-3 space-x-3">
-                <button onClick={() => setViewDate(new Date(viewDate.setMonth(viewDate.getMonth() - 1)))} className="p-2 hover:bg-white rounded-xl transition-all"><ChevronLeft size={16}/></button>
+                <button onClick={() => changeMonth(-1)} className="p-2 hover:bg-white rounded-xl transition-all"><ChevronLeft size={16}/></button>
                 <span className="text-[10px] font-black uppercase tracking-widest min-w-[100px] text-center">
                   {viewDate.toLocaleDateString('th-TH', { month: 'long', year: 'numeric' })}
                 </span>
-                <button onClick={() => setViewDate(new Date(viewDate.setMonth(viewDate.getMonth() + 1)))} className="p-2 hover:bg-white rounded-xl transition-all"><ChevronRight size={16}/></button>
+                <button onClick={() => changeMonth(1)} className="p-2 hover:bg-white rounded-xl transition-all"><ChevronRight size={16}/></button>
              </div>
              <button onClick={handleLogout} className="flex items-center space-x-2 text-slate-400 hover:text-rose-500 px-2 py-2 font-black text-xs transition-colors uppercase tracking-widest">
                <LogOut size={18} />
@@ -289,11 +285,11 @@ export default function App() {
               Monthly Calendar
             </h2>
             <div className="flex md:hidden items-center bg-slate-50 rounded-2xl p-1 px-2">
-                <button onClick={() => setViewDate(new Date(viewDate.setMonth(viewDate.getMonth() - 1)))} className="p-1"><ChevronLeft size={14}/></button>
+                <button onClick={() => changeMonth(-1)} className="p-1"><ChevronLeft size={14}/></button>
                 <span className="text-[8px] font-black uppercase tracking-widest mx-2">
                   {viewDate.toLocaleDateString('th-TH', { month: 'short' })}
                 </span>
-                <button onClick={() => setViewDate(new Date(viewDate.setMonth(viewDate.getMonth() + 1)))} className="p-1"><ChevronRight size={14}/></button>
+                <button onClick={() => changeMonth(1)} className="p-1"><ChevronRight size={14}/></button>
             </div>
           </div>
           <div className="grid grid-cols-7 gap-1 md:gap-2">
