@@ -1,14 +1,19 @@
-/* global __firebase_config, __app_id, __initial_auth_token */
 import React, { useState, useEffect, useMemo } from 'react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend } from 'recharts';
-import { Wallet, TrendingUp, TrendingDown, PiggyBank, PlusCircle, Trash2, Loader2, Sparkles, Calendar, Tag, ArrowUpRight, ArrowDownLeft, DatabaseZap, Cloud } from 'lucide-react';
-import { initializeApp, getApps } from 'firebase/app';
-import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
-import { getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp, query } from 'firebase/firestore';
+import { 
+  PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend 
+} from 'recharts';
+import { 
+  Wallet, TrendingDown, PlusCircle, Trash2, AlertCircle, LogIn, LogOut, User, Lock, RefreshCcw, Edit3, X, Download, Calendar as CalendarIcon, ChevronLeft, ChevronRight
+} from 'lucide-react';
+import { initializeApp } from 'firebase/app';
+import { 
+  getAuth, signInAnonymously, onAuthStateChanged, signOut 
+} from 'firebase/auth';
+import { 
+  getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp, updateDoc
+} from 'firebase/firestore';
 
 // --- Firebase Configuration ---
-// ใช้ Config จากระบบหรือใส่ของคุณเองตรงนี้
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
   apiKey: "AIzaSyBP8IDfuEeAVfIxTih7W9g6tssuyaUrlmM",
   authDomain: "my-finance-tracker-e9696.firebaseapp.com",
@@ -19,367 +24,443 @@ const firebaseConfig = {
   measurementId: "G-V6Z3S8W8CY"
 };
 
-// Initialize Firebase
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
+const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : "personal-finance-ledger-v1";
+const appId = "my-finance-app"; 
 
-const COLORS = ['#6366f1', '#ec4899', '#10b981', '#f59e0b', '#3b82f6'];
+const COLORS = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8', '#F7DC6F'];
 
+// --- Helper Functions ---
+const getDaysInMonth = (year, month) => new Date(year, month + 1, 0).getDate();
+const getFirstDayOfMonth = (year, month) => new Date(year, month, 1).getDay();
+
+// --- Login View ---
+function LoginView({ onLoginSuccess }) {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+
+  const handleLogin = (e) => {
+    e.preventDefault();
+    if (username === 'handsomemakmak' && password === '!Handsomemakmak23') {
+      onLoginSuccess();
+    } else {
+      setError('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง');
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
+      <div className="bg-white p-10 rounded-[3rem] shadow-2xl w-full max-w-md border border-slate-100">
+        <div className="text-center mb-12">
+          <div className="bg-blue-600 w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-xl shadow-blue-100 transform rotate-3">
+            <Wallet className="text-white" size={40} />
+          </div>
+          <h1 className="text-3xl font-black italic text-slate-900 tracking-tighter uppercase">FINANCE HUB</h1>
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Administrator Access</p>
+        </div>
+        <form onSubmit={handleLogin} className="space-y-5">
+          <div className="relative">
+            <User className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={20} />
+            <input type="text" placeholder="Username" className="w-full pl-14 pr-6 py-5 bg-slate-50 border-2 border-transparent rounded-[1.5rem] focus:border-blue-500 focus:bg-white outline-none font-bold transition-all" value={username} onChange={(e) => setUsername(e.target.value)} required />
+          </div>
+          <div className="relative">
+            <Lock className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={20} />
+            <input type="password" placeholder="Password" className="w-full pl-14 pr-6 py-5 bg-slate-50 border-2 border-transparent rounded-[1.5rem] focus:border-blue-500 focus:bg-white outline-none font-bold transition-all" value={password} onChange={(e) => setPassword(e.target.value)} required />
+          </div>
+          {error && <div className="bg-rose-50 text-rose-600 p-4 rounded-2xl text-xs font-bold flex items-center"><AlertCircle size={16} className="mr-2" /> {error}</div>}
+          <button type="submit" className="w-full bg-slate-900 hover:bg-black text-white font-black py-5 rounded-[1.5rem] transition-all shadow-xl flex items-center justify-center space-x-3 group">
+            <span>SIGN IN</span>
+            <LogIn size={20} className="group-hover:translate-x-1 transition-transform" />
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// --- Main App ---
 export default function App() {
+  const [isAuthorized, setIsAuthorized] = useState(false);
   const [user, setUser] = useState(null);
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   
-  const [form, setForm] = useState({ 
-    type: 'expense', 
-    category: 'ค่าอาหาร-เครื่องดื่ม', 
-    amount: '', 
-    date: new Date().toISOString().split('T')[0] 
-  });
+  // Date Control
+  const [viewDate, setViewDate] = useState(new Date());
+  const [editingId, setEditingId] = useState(null);
+
+  // Form State
+  const [type, setType] = useState('expense');
+  const [category, setCategory] = useState('ค่าอาหาร-เครื่องดื่ม');
+  const [subCategory, setSubCategory] = useState('');
+  const [amount, setAmount] = useState('');
+  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
 
   const categories = {
-    income: ['เงินเดือน', 'โบนัส', 'เงินปันผล', 'รับจ้างอิสระ', 'อื่นๆ'],
-    expense: ['ค่าอาหาร-เครื่องดื่ม', 'ค่าเดินทาง', 'ช้อปปิ้ง', 'ค่าที่พัก', 'สุขภาพ', 'บันเทิง', 'อื่นๆ'],
-    saving: ['เงินออมฉุกเฉิน', 'ลงทุนหุ้น/กองทุน', 'ประกันชีวิต', 'เกษียณอายุ']
+    income: ['เงินเดือน', 'เงิน Affiliate', 'อื่นๆ (ระบุ)'],
+    expense: ['ค่าอาหาร-เครื่องดื่ม', 'ค่าเดินทาง(น้ำมัน)', 'สิ่งของฟุ่มเฟือย', 'อื่นๆ'],
+    saving: ['สะสมฉุกเฉิน', 'เงินออม', 'ลงทุน (คริปโต)', 'ลงทุน (หุ้น/กองทุน)']
   };
 
-  // Inject Tailwind via CDN
   useEffect(() => {
-    if (!document.getElementById('tailwind-cdn')) {
-      const script = document.createElement('script');
-      script.id = 'tailwind-cdn';
-      script.src = 'https://cdn.tailwindcss.com';
-      document.head.appendChild(script);
-    }
-  }, []);
-
-  // Auth Effect - FIXED: Improved error handling for custom token
-  useEffect(() => {
+    const savedAuth = sessionStorage.getItem('is_admin_logged_in');
+    if (savedAuth === 'true') setIsAuthorized(true);
     const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          try {
-            await signInWithCustomToken(auth, __initial_auth_token);
-          } catch (tokenErr) {
-            console.error("Custom Token Error, falling back to anonymous:", tokenErr);
-            await signInAnonymously(auth);
-          }
-        } else {
-          await signInAnonymously(auth);
-        }
-      } catch (err) {
-        console.error("Critical Auth Error:", err);
-        setError("ไม่สามารถเชื่อมต่อระบบยืนยันตัวตนได้ กรุณารีเฟรชหน้าจอ");
-      }
+      try { await signInAnonymously(auth); } catch (err) { setLoading(false); }
     };
-
     initAuth();
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
-      if (currentUser) {
-        setLoading(false);
-        setError(null);
-      }
+      if (!currentUser) setLoading(false);
     });
-
-    return () => unsubscribe();
+    return () => unsubscribeAuth();
   }, []);
 
-  // Firestore Real-time Listener
   useEffect(() => {
-    if (!user) return;
-
-    // Path ตามกฎ: /artifacts/{appId}/users/{userId}/{collectionName}
-    const txRef = collection(db, 'artifacts', appId, 'users', user.uid, 'transactions');
-    
-    const unsubscribe = onSnapshot(txRef, (snapshot) => {
-      const data = snapshot.docs.map(d => ({ 
-        id: d.id, 
-        ...d.data() 
-      }));
-      // เรียงลำดับตามวันที่ในเครื่อง
-      data.sort((a, b) => new Date(b.date) - new Date(a.date));
+    if (!user || !isAuthorized) return;
+    const transactionsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'transactions');
+    const unsubscribeData = onSnapshot(transactionsRef, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setTransactions(data);
+      setLoading(false);
     }, (err) => {
-      console.error("Firestore Read Error:", err);
-      // Only show error if it's not a permission error during initial load
-      if (err.code !== 'permission-denied') {
-        setError("เกิดข้อผิดพลาดในการดึงข้อมูลจาก Cloud");
-      }
+      console.error(err);
+      setLoading(false);
     });
+    return () => unsubscribeData();
+  }, [user, isAuthorized]);
 
-    return () => unsubscribe();
-  }, [user]);
+  // Derived Data for Filtered View
+  const filteredTransactions = useMemo(() => {
+    return transactions.filter(t => {
+      const d = new Date(t.date);
+      return d.getMonth() === viewDate.getMonth() && d.getFullYear() === viewDate.getFullYear();
+    }).sort((a, b) => new Date(b.date) - new Date(a.date));
+  }, [transactions, viewDate]);
 
-  const stats = useMemo(() => {
-    const inc = transactions.filter(t => t.type === 'income').reduce((a, b) => a + (Number(b.amount) || 0), 0);
-    const exp = transactions.filter(t => t.type === 'expense').reduce((a, b) => a + (Number(b.amount) || 0), 0);
-    const sav = transactions.filter(t => t.type === 'saving').reduce((a, b) => a + (Number(b.amount) || 0), 0);
-    return { inc, exp, sav, bal: inc - exp - sav };
-  }, [transactions]);
+  // Calendar Data
+  const calendarDays = useMemo(() => {
+    const year = viewDate.getFullYear();
+    const month = viewDate.getMonth();
+    const daysInMonth = getDaysInMonth(year, month);
+    const firstDay = getFirstDayOfMonth(year, month);
+    const calendar = [];
+    
+    // Empty slots before first day
+    for (let i = 0; i < firstDay; i++) calendar.push(null);
+    
+    // Days
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      const dayTxs = transactions.filter(t => t.date === dateStr);
+      const inc = dayTxs.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+      const exp = dayTxs.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+      calendar.push({ day: d, income: inc, expense: exp });
+    }
+    return calendar;
+  }, [transactions, viewDate]);
 
-  const chartData = useMemo(() => {
-    const res = transactions.filter(t => t.type === 'expense').reduce((acc, t) => {
-      acc[t.category] = (acc[t.category] || 0) + (Number(t.amount) || 0);
-      return acc;
-    }, {});
-    return Object.entries(res).map(([name, value]) => ({ name, value }));
-  }, [transactions]);
+  const handleLoginSuccess = () => {
+    setIsAuthorized(true);
+    sessionStorage.setItem('is_admin_logged_in', 'true');
+  };
+
+  const handleLogout = () => {
+    setIsAuthorized(false);
+    sessionStorage.removeItem('is_admin_logged_in');
+    signOut(auth);
+  };
+
+  const resetForm = () => {
+    setEditingId(null);
+    setAmount('');
+    setSubCategory('');
+    setDate(new Date().toISOString().split('T')[0]);
+    setType('expense');
+    setCategory(categories['expense'][0]);
+  };
+
+  const startEdit = (tx) => {
+    setEditingId(tx.id);
+    setType(tx.type);
+    setCategory(tx.category);
+    setSubCategory(tx.subCategory || '');
+    setAmount(tx.amount.toString());
+    setDate(tx.date);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!form.amount || !user) return;
-
+    if (!user || !amount) return;
     try {
-      const txRef = collection(db, 'artifacts', appId, 'users', user.uid, 'transactions');
-      await addDoc(txRef, {
-        ...form,
-        amount: parseFloat(form.amount),
-        createdAt: serverTimestamp()
-      });
-      setForm({ ...form, amount: '' });
-    } catch (err) {
-      console.error("Cloud Save Error:", err);
-      setError("บันทึกข้อมูลไม่สำเร็จ");
-    }
+      const transactionsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'transactions');
+      const data = {
+        type, category,
+        subCategory: (category === 'อื่นๆ (ระบุ)' || category.includes('ลงทุน')) ? subCategory : '',
+        amount: parseFloat(amount),
+        date, 
+        updatedAt: serverTimestamp()
+      };
+      if (editingId) {
+        await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'transactions', editingId), data);
+      } else {
+        await addDoc(transactionsRef, { ...data, createdAt: serverTimestamp() });
+      }
+      resetForm();
+    } catch (err) { alert(err.message); }
   };
 
   const handleDelete = async (id) => {
     if (!user) return;
     try {
-      const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'transactions', id);
-      await deleteDoc(docRef);
-    } catch (err) {
-      console.error("Cloud Delete Error:", err);
-      setError("ลบข้อมูลไม่สำเร็จ");
-    }
+      await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'transactions', id));
+      if (editingId === id) resetForm();
+    } catch (err) { console.error(err); }
   };
 
-  if (loading) return (
-    <div className="h-screen flex flex-col items-center justify-center bg-slate-50">
-      <Loader2 className="animate-spin text-indigo-600 mb-4" size={40} />
-      <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">Connecting to Cloud...</p>
-    </div>
-  );
+  const exportToCSV = () => {
+    if (filteredTransactions.length === 0) return;
+    const headers = ["Date", "Type", "Category", "SubCategory", "Amount"];
+    const rows = filteredTransactions.map(t => [t.date, t.type, t.category, t.subCategory || '', t.amount]);
+    let csvContent = "data:text/csv;charset=utf-8," + headers.join(",") + "\n" + rows.map(e => e.join(",")).join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `finance_report_${viewDate.getFullYear()}_${viewDate.getMonth() + 1}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const totalIncome = filteredTransactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0);
+  const totalExpense = filteredTransactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0);
+  const totalSaving = filteredTransactions.filter(t => t.type === 'saving').reduce((sum, t) => sum + t.amount, 0);
+  const balance = totalIncome - totalExpense - totalSaving;
+
+  const expenseChartData = filteredTransactions
+    .filter(t => t.type === 'expense')
+    .reduce((acc, curr) => {
+      const existing = acc.find(item => item.name === curr.category);
+      if (existing) existing.value += curr.amount;
+      else acc.push({ name: curr.category, value: curr.amount });
+      return acc;
+    }, []);
+
+  if (!isAuthorized) return <LoginView onLoginSuccess={handleLoginSuccess} />;
+  if (loading) return <div className="h-screen flex items-center justify-center bg-slate-50"><RefreshCcw className="animate-spin text-blue-600" /></div>;
 
   return (
-    <div className="min-h-screen bg-[#FDFDFD] text-slate-900 p-4 lg:p-10 font-sans">
-      <div className="max-w-6xl mx-auto space-y-8">
+    <div className="min-h-screen bg-slate-50 p-4 md:p-8 font-sans text-slate-900">
+      <div className="max-w-6xl mx-auto space-y-6">
         
-        {/* Cloud Status Indicator */}
-        <div className="bg-indigo-50 border border-indigo-100 p-4 rounded-2xl flex items-center justify-between mb-4 shadow-sm">
-          <div className="flex items-center gap-3 text-indigo-700">
-            <Cloud size={20} className="animate-pulse" />
-            <span className="text-xs font-black uppercase tracking-wider italic text-indigo-600">Cloud Sync Active</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[9px] font-bold text-indigo-500 uppercase px-3 py-1 bg-white rounded-full border border-indigo-200">
-              User: {user?.uid.substring(0, 8)}...
-            </span>
-            <div className="w-2 h-2 bg-emerald-500 rounded-full animate-ping"></div>
-          </div>
-        </div>
-
-        {error && (
-          <div className="bg-rose-50 border border-rose-100 p-4 rounded-2xl flex items-center gap-3 text-rose-600 animate-bounce">
-            <DatabaseZap size={20} />
-            <span className="text-xs font-bold uppercase">{error}</span>
-          </div>
-        )}
-
-        <header className="flex flex-col md:flex-row justify-between items-center bg-white p-8 rounded-[2.5rem] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100 gap-4">
-          <div className="flex items-center gap-5">
-            <div className="bg-indigo-600 p-4 rounded-[1.5rem] text-white shadow-xl rotate-3">
-              <Wallet size={32} />
+        {/* Header */}
+        <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 flex justify-between items-center">
+          <div className="flex items-center space-x-4">
+            <div className="bg-blue-600 p-3 rounded-2xl shadow-lg shadow-blue-100 transform rotate-3">
+              <Wallet className="text-white" size={24} />
             </div>
             <div>
-              <h1 className="text-2xl font-black italic tracking-tighter uppercase leading-none text-slate-800">Financial Ledger</h1>
-              <p className="text-[10px] font-bold text-indigo-500 uppercase tracking-[0.2em] mt-1">Cloud Integrated Analytics</p>
+              <h1 className="text-xl font-black italic tracking-tighter uppercase">FINANCE HUB</h1>
+              <p className="text-[10px] font-black text-blue-500 uppercase tracking-widest">Admin Control</p>
             </div>
           </div>
-          <div className="px-6 py-2 bg-slate-50 rounded-full text-[10px] font-black text-slate-400 uppercase border border-slate-100 flex items-center gap-2">
-            ID: <span className="text-slate-800 truncate max-w-[100px]">{user?.uid}</span>
+          <div className="flex items-center space-x-4">
+             <div className="hidden md:flex items-center bg-slate-50 rounded-2xl p-1 px-3 space-x-3">
+                <button onClick={() => setViewDate(new Date(viewDate.setMonth(viewDate.getMonth() - 1)))} className="p-2 hover:bg-white rounded-xl transition-all"><ChevronLeft size={16}/></button>
+                <span className="text-[10px] font-black uppercase tracking-widest min-w-[100px] text-center">
+                  {viewDate.toLocaleDateString('th-TH', { month: 'long', year: 'numeric' })}
+                </span>
+                <button onClick={() => setViewDate(new Date(viewDate.setMonth(viewDate.getMonth() + 1)))} className="p-2 hover:bg-white rounded-xl transition-all"><ChevronRight size={16}/></button>
+             </div>
+             <button onClick={handleLogout} className="flex items-center space-x-2 text-slate-400 hover:text-rose-500 px-2 py-2 font-black text-xs transition-colors uppercase tracking-widest">
+               <LogOut size={18} />
+             </button>
           </div>
-        </header>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {[
-            { label: 'ยอดคงเหลือปัจจุบัน', val: stats.bal, icon: Wallet, color: 'text-slate-900', bg: 'bg-white' },
-            { label: 'รายรับเดือนนี้', val: stats.inc, icon: TrendingUp, color: 'text-white', bg: 'bg-indigo-600' },
-            { label: 'รายจ่ายเดือนนี้', val: stats.exp, icon: TrendingDown, color: 'text-white', bg: 'bg-rose-500' },
-            { label: 'เงินออมสุทธิ', val: stats.sav, icon: PiggyBank, color: 'text-white', bg: 'bg-emerald-500' }
-          ].map((c, i) => (
-            <div key={i} className={`${c.bg} p-8 rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col justify-between h-44 hover:translate-y-[-4px] transition-all duration-300`}>
-              <div className={`flex justify-between items-start ${c.color === 'text-white' ? 'opacity-70' : 'text-slate-300'}`}>
-                <span className="text-[10px] font-black uppercase tracking-widest">{c.label}</span>
-                <c.icon size={18} />
-              </div>
-              <h3 className={`text-3xl font-black ${c.color}`}>฿{c.val.toLocaleString()}</h3>
-            </div>
-          ))}
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          <section className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100">
-            <h2 className="text-lg font-black uppercase italic mb-8 flex items-center gap-3 text-slate-800">
-              <PlusCircle className="text-indigo-600" size={24} /> เพิ่มรายการใหม่
+        {/* Calendar Summary */}
+        <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 overflow-hidden">
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-lg font-black flex items-center text-slate-800 uppercase tracking-tight italic">
+              <CalendarIcon className="mr-3 text-blue-600" size={20} />
+              Monthly Calendar
             </h2>
+            <div className="flex md:hidden items-center bg-slate-50 rounded-2xl p-1 px-2">
+                <button onClick={() => setViewDate(new Date(viewDate.setMonth(viewDate.getMonth() - 1)))} className="p-1"><ChevronLeft size={14}/></button>
+                <span className="text-[8px] font-black uppercase tracking-widest mx-2">
+                  {viewDate.toLocaleDateString('th-TH', { month: 'short' })}
+                </span>
+                <button onClick={() => setViewDate(new Date(viewDate.setMonth(viewDate.getMonth() + 1)))} className="p-1"><ChevronRight size={14}/></button>
+            </div>
+          </div>
+          <div className="grid grid-cols-7 gap-1 md:gap-2">
+            {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map(d => (
+              <div key={d} className="text-center text-[10px] font-black text-slate-300 py-2">{d}</div>
+            ))}
+            {calendarDays.map((dayData, idx) => (
+              <div key={idx} className={`min-h-[60px] md:min-h-[80px] p-1 md:p-2 rounded-2xl border ${dayData ? 'bg-slate-50 border-transparent hover:border-blue-100 transition-all' : 'bg-transparent border-transparent'}`}>
+                {dayData && (
+                  <>
+                    <span className="text-[10px] font-black text-slate-400">{dayData.day}</span>
+                    <div className="mt-1 space-y-0.5">
+                      {dayData.income > 0 && <div className="text-[8px] md:text-[9px] font-black text-emerald-500 truncate">+{dayData.income.toLocaleString()}</div>}
+                      {dayData.expense > 0 && <div className="text-[8px] md:text-[9px] font-black text-rose-500 truncate">-{dayData.expense.toLocaleString()}</div>}
+                    </div>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Dashboard Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100">
+            <p className="text-[10px] font-black text-slate-400 uppercase mb-2 tracking-widest">NET BALANCE ({viewDate.getMonth() + 1})</p>
+            <h3 className={`text-3xl font-black ${balance >= 0 ? 'text-slate-900' : 'text-rose-500'}`}>฿{balance.toLocaleString()}</h3>
+          </div>
+          <div className="bg-emerald-500 p-8 rounded-[2.5rem] text-white shadow-xl shadow-emerald-100">
+            <p className="text-[10px] font-black opacity-80 uppercase mb-2 tracking-widest">INCOME</p>
+            <h3 className="text-3xl font-black">฿{totalIncome.toLocaleString()}</h3>
+          </div>
+          <div className="bg-rose-500 p-8 rounded-[2.5rem] text-white shadow-xl shadow-rose-100">
+            <p className="text-[10px] font-black opacity-80 uppercase mb-2 tracking-widest">EXPENSE</p>
+            <h3 className="text-3xl font-black">฿{totalExpense.toLocaleString()}</h3>
+          </div>
+          <div className="bg-indigo-500 p-8 rounded-[2.5rem] text-white shadow-xl shadow-indigo-100">
+            <p className="text-[10px] font-black opacity-80 uppercase mb-2 tracking-widest">SAVINGS</p>
+            <h3 className="text-3xl font-black">฿{totalSaving.toLocaleString()}</h3>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Form */}
+          <div className={`p-8 rounded-[2.5rem] shadow-sm border transition-all h-fit ${editingId ? 'bg-blue-50 border-blue-200' : 'bg-white border-slate-100'}`}>
+            <div className="flex justify-between items-center mb-8">
+              <h2 className="text-lg font-black flex items-center text-slate-800 uppercase tracking-tight">
+                {editingId ? <Edit3 className="mr-3 text-blue-600" size={24} /> : <PlusCircle className="mr-3 text-blue-600" size={24} />}
+                {editingId ? 'EDIT ENTRY' : 'NEW ENTRY'}
+              </h2>
+              {editingId && <button onClick={resetForm} className="text-slate-400 hover:text-slate-600"><X size={20} /></button>}
+            </div>
             <form onSubmit={handleSubmit} className="space-y-6">
-              <div className="flex p-1.5 bg-slate-50 rounded-2xl gap-1 border border-slate-100">
+              <div className={`flex p-1.5 rounded-[1.5rem] ${editingId ? 'bg-blue-100/50' : 'bg-slate-50'}`}>
                 {['income', 'expense', 'saving'].map((t) => (
-                  <button key={t} type="button" onClick={() => setForm({...form, type: t, category: categories[t][0]})}
-                    className={`flex-1 py-3 text-[10px] font-black rounded-xl transition-all uppercase ${form.type === t ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-400'}`}>
-                    {t === 'income' ? 'รายรับ' : t === 'expense' ? 'รายจ่าย' : 'เงินออม'}
+                  <button key={t} type="button" onClick={() => { setType(t); setCategory(categories[t][0]); }} className={`flex-1 py-3 text-[10px] font-black rounded-2xl transition-all uppercase tracking-widest ${type === t ? 'bg-white shadow-md text-blue-600' : 'text-slate-400'}`}>
+                    {t === 'income' ? 'รับ' : t === 'expense' ? 'จ่าย' : 'ออม'}
                   </button>
                 ))}
               </div>
-
-              <div className="space-y-5">
-                <div className="relative group">
-                   <Tag className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-indigo-500 transition-colors" size={18} />
-                   <select 
-                    value={form.category} 
-                    onChange={(e) => setForm({...form, category: e.target.value})}
-                    className="w-full pl-12 pr-5 py-4 bg-slate-50 rounded-2xl focus:ring-2 ring-indigo-100 outline-none font-bold text-sm appearance-none cursor-pointer border border-transparent focus:border-indigo-200 transition-all"
-                   >
-                     {categories[form.type].map(cat => <option key={cat} value={cat}>{cat}</option>)}
-                   </select>
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block ml-1 tracking-widest">CATEGORY</label>
+                <select value={category} onChange={(e) => setCategory(e.target.value)} className="w-full p-5 bg-white border-none rounded-2xl outline-none font-bold text-sm shadow-sm">
+                  {categories[type].map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                </select>
+              </div>
+              {(category === 'อื่นๆ (ระบุ)' || category.includes('ลงทุน')) && (
+                <div className="animate-in fade-in slide-in-from-top-4">
+                  <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block ml-1 tracking-widest">DETAIL</label>
+                  <input type="text" value={subCategory} onChange={(e) => setSubCategory(e.target.value)} placeholder="ระบุเพิ่มเติม..." className="w-full p-5 bg-white border-none rounded-2xl outline-none font-bold text-sm shadow-sm" required />
                 </div>
-
-                <div className="relative group">
-                   <span className="absolute left-4 top-1/2 -translate-y-1/2 font-black text-xl text-slate-300 group-focus-within:text-indigo-500">฿</span>
-                   <input 
-                    type="number" 
-                    value={form.amount} 
-                    onChange={(e) => setForm({...form, amount: e.target.value})} 
-                    placeholder="0.00"
-                    className="w-full pl-12 pr-5 py-5 bg-slate-50 rounded-2xl focus:ring-2 ring-indigo-100 outline-none font-black text-2xl text-indigo-600 border border-transparent focus:border-indigo-200" 
-                    required 
-                   />
+              )}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block ml-1 tracking-widest">AMOUNT</label>
+                  <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full p-5 bg-white border-none rounded-2xl outline-none font-black text-blue-600 text-lg shadow-sm" placeholder="0" required />
                 </div>
-
-                <div className="relative group">
-                   <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
-                   <input 
-                    type="date" 
-                    value={form.date} 
-                    onChange={(e) => setForm({...form, date: e.target.value})}
-                    className="w-full pl-12 pr-5 py-4 bg-slate-50 rounded-2xl focus:ring-2 ring-indigo-100 outline-none font-bold text-sm border border-transparent focus:border-indigo-200" 
-                    required 
-                   />
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block ml-1 tracking-widest">DATE</label>
+                  <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full p-5 bg-white border-none rounded-2xl outline-none text-xs font-bold shadow-sm" required />
                 </div>
               </div>
-
-              <button type="submit" className="w-full bg-slate-900 text-white font-black py-5 rounded-2xl shadow-xl hover:bg-black transition-all uppercase tracking-[0.2em] text-xs">
-                บันทึกไปยังคลาวด์
+              <button type="submit" className={`w-full text-white font-black py-5 rounded-2xl transition-all shadow-xl uppercase tracking-widest ${editingId ? 'bg-blue-600 hover:bg-blue-700 shadow-blue-100' : 'bg-slate-900 hover:bg-black shadow-slate-200'}`}>
+                {editingId ? 'UPDATE RECORD' : 'SAVE RECORD'}
               </button>
             </form>
-          </section>
+          </div>
 
-          <section className="lg:col-span-2 bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 min-h-[450px] flex flex-col">
-            <div className="flex justify-between items-center mb-10">
-              <h2 className="text-lg font-black uppercase italic flex items-center gap-3 text-slate-800">
-                <Sparkles className="text-indigo-600" /> สัดส่วนค่าใช้จ่าย
-              </h2>
-              <div className="text-[10px] font-black text-slate-400 bg-slate-50 px-4 py-2 rounded-xl">ข้อมูลล่าสุดแบบ Real-time</div>
-            </div>
-            
-            <div className="flex-1">
-              {chartData.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
+          {/* Analytics */}
+          <div className="lg:col-span-2 bg-white p-10 rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col min-h-[450px]">
+            <h2 className="text-xl font-black text-slate-800 mb-10 uppercase tracking-tight italic">MONTHLY ANALYSIS</h2>
+            <div className="flex-1 flex items-center justify-center">
+              {expenseChartData.length > 0 ? (
+                <ResponsiveContainer width="100%" height={350}>
                   <PieChart>
-                    <Pie 
-                      data={chartData} 
-                      innerRadius={90} 
-                      outerRadius={120} 
-                      paddingAngle={10} 
-                      dataKey="value" 
-                      stroke="none"
-                      animationDuration={1200}
-                    >
-                      {chartData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                    <Pie data={expenseChartData} cx="50%" cy="50%" innerRadius={90} outerRadius={125} paddingAngle={8} dataKey="value" strokeWidth={0}>
+                      {expenseChartData.map((_, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
                     </Pie>
-                    <RechartsTooltip 
-                      contentStyle={{borderRadius: '1.5rem', border: 'none', boxShadow: '0 20px 40px rgba(0,0,0,0.1)', padding: '1.2rem'}} 
-                      itemStyle={{fontWeight: '900', textTransform: 'uppercase', fontSize: '12px'}}
-                    />
-                    <Legend verticalAlign="bottom" align="center" iconType="circle" />
+                    <RechartsTooltip contentStyle={{ borderRadius: '24px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', padding: '15px' }} />
+                    <Legend iconType="circle" wrapperStyle={{ fontWeight: 'bold', fontSize: '12px' }} />
                   </PieChart>
                 </ResponsiveContainer>
               ) : (
-                <div className="h-full flex flex-col items-center justify-center text-slate-200 space-y-4">
-                   <div className="p-10 bg-slate-50 rounded-full border-2 border-dashed border-slate-100">
-                     <PieChart size={64} className="opacity-20" />
-                   </div>
-                   <p className="font-black uppercase tracking-widest text-[10px]">ยังไม่มีข้อมูลวิเคราะห์</p>
+                <div className="text-center text-slate-200">
+                  <TrendingDown size={60} className="mx-auto mb-4" />
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">NO DATA FOR THIS MONTH</p>
                 </div>
               )}
             </div>
-          </section>
+          </div>
         </div>
 
-        <section className="bg-white rounded-[2.5rem] shadow-sm border border-slate-100 overflow-hidden">
-          <div className="p-8 border-b border-slate-50 flex justify-between items-center bg-slate-50/20">
-            <h2 className="font-black text-xl uppercase italic tracking-tight text-slate-800">ประวัติธุรกรรม</h2>
-            <div className="bg-white px-4 py-2 rounded-xl border border-slate-100 text-[10px] font-black text-indigo-600">
-              TOTAL ENTRIES: {transactions.length}
+        {/* History List */}
+        <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-100 overflow-hidden">
+          <div className="p-10 border-b border-slate-50 flex flex-col sm:flex-row justify-between items-start sm:items-center space-y-4 sm:space-y-0">
+            <h2 className="font-black text-xl tracking-tighter text-slate-800 uppercase italic">Monthly History</h2>
+            <div className="flex items-center space-x-3">
+              <button 
+                onClick={exportToCSV}
+                disabled={filteredTransactions.length === 0}
+                className={`flex items-center space-x-2 px-6 py-3 rounded-2xl font-black text-[10px] tracking-widest transition-all ${filteredTransactions.length > 0 ? 'bg-blue-50 text-blue-600 hover:bg-blue-100' : 'bg-slate-50 text-slate-300 cursor-not-allowed'}`}
+              >
+                <Download size={16} />
+                <span>EXPORT REPORT</span>
+              </button>
             </div>
           </div>
-          
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead className="bg-slate-50/50 text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] border-b border-slate-50">
+            <table className="w-full text-left">
+              <thead className="bg-slate-50 text-slate-400 text-[10px] font-black uppercase tracking-widest">
                 <tr>
-                  <th className="px-10 py-6">วันที่</th>
-                  <th className="px-10 py-6">หมวดหมู่</th>
-                  <th className="px-10 py-6 text-right">จำนวนเงิน (บาท)</th>
-                  <th className="px-10 py-6 text-center">จัดการ</th>
+                  <th className="px-10 py-6">Date</th>
+                  <th className="px-10 py-6">Category</th>
+                  <th className="px-10 py-6 text-right">Amount</th>
+                  <th className="px-10 py-6 text-center">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {transactions.map((tx) => (
-                  <tr key={tx.id} className="group hover:bg-slate-50/40 transition-colors">
-                    <td className="px-10 py-8 text-xs font-bold text-slate-400 tracking-tighter">{tx.date}</td>
+                {filteredTransactions.map((tx) => (
+                  <tr key={tx.id} className={`hover:bg-slate-50/50 transition-colors group ${editingId === tx.id ? 'bg-blue-50/50' : ''}`}>
+                    <td className="px-10 py-8 text-xs font-bold text-slate-400">{new Date(tx.date).toLocaleDateString('th-TH', { day: '2-digit', month: 'short' })}</td>
                     <td className="px-10 py-8">
-                      <div className="flex items-center gap-3">
-                        <div className={`p-2 rounded-lg ${tx.type === 'income' ? 'bg-indigo-50 text-indigo-500' : tx.type === 'expense' ? 'bg-rose-50 text-rose-500' : 'bg-emerald-50 text-emerald-500'}`}>
-                          {tx.type === 'income' ? <ArrowUpRight size={14} /> : <ArrowDownLeft size={14} />}
+                      <div className="flex items-center space-x-4">
+                        <div className={`w-3 h-3 rounded-full ${tx.type === 'income' ? 'bg-emerald-500' : tx.type === 'expense' ? 'bg-rose-500' : 'bg-indigo-500'}`}></div>
+                        <div>
+                           <div className="font-black text-slate-800 text-sm tracking-tight">{tx.category}</div>
+                           {tx.subCategory && <div className="text-[10px] text-blue-600 font-black uppercase mt-1 bg-blue-50 px-2 py-0.5 rounded-md inline-block tracking-widest">{tx.subCategory}</div>}
                         </div>
-                        <span className="font-black text-sm uppercase italic tracking-tighter text-slate-700">{tx.category}</span>
                       </div>
                     </td>
-                    <td className={`px-10 py-8 text-right font-black text-2xl tracking-tighter ${tx.type === 'income' ? 'text-indigo-600' : tx.type === 'expense' ? 'text-rose-600' : 'text-emerald-600'}`}>
+                    <td className={`px-10 py-8 text-right font-black text-xl ${tx.type === 'income' ? 'text-emerald-500' : tx.type === 'expense' ? 'text-rose-500' : 'text-indigo-500'}`}>
                       {tx.type === 'income' ? '+' : '-'}{tx.amount.toLocaleString()}
                     </td>
-                    <td className="px-10 py-8 text-center">
-                      <button 
-                        onClick={() => handleDelete(tx.id)} 
-                        className="p-3 text-slate-200 hover:text-rose-500 hover:bg-rose-50 transition-all rounded-2xl active:scale-90"
-                      >
-                        <Trash2 size={20} />
-                      </button>
+                    <td className="px-10 py-8">
+                      <div className="flex items-center justify-center space-x-2">
+                        <button onClick={() => startEdit(tx)} className="text-slate-300 hover:text-blue-500 transition-all p-3 hover:bg-blue-50 rounded-2xl"><Edit3 size={18} /></button>
+                        <button onClick={() => handleDelete(tx.id)} className="text-slate-300 hover:text-rose-500 transition-all p-3 hover:bg-rose-50 rounded-2xl"><Trash2 size={18} /></button>
+                      </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            {transactions.length === 0 && (
-              <div className="py-24 text-center">
-                <p className="text-slate-300 font-black uppercase tracking-[0.3em] text-[10px] italic">ไม่มีข้อมูลในขณะนี้ • เริ่มเพิ่มรายการแรกได้เลย</p>
-              </div>
-            )}
+            {filteredTransactions.length === 0 && <div className="p-24 text-center"><p className="text-slate-300 font-black uppercase tracking-[0.4em] text-[10px]">No History for this Month</p></div>}
           </div>
-        </section>
-      </div>
-      
-      <footer className="mt-16 text-center pb-12">
-        <div className="inline-block px-8 py-4 bg-slate-100 rounded-full">
-           <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.4em]">Cloud Security Enabled • Data Encrypted</p>
         </div>
-      </footer>
+      </div>
     </div>
   );
 }
